@@ -1,17 +1,17 @@
 package com.disneystreaming.mercury.demo
 
 import cats.effect.{Async, Blocker, Concurrent, ContextShift, IO}
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
 import com.disneystreaming.mercury.demo.tc.models.Person
 import fs2.Chunk
 import fs2.aws.s3.{BucketName, FileKey, S3}
+import io.circe
 import io.circe.Printer
 import io.circe.generic.auto._
 import io.circe.syntax.EncoderOps
+import org.scanamo.{ScanamoCats, Table}
 import software.amazon.awssdk.services.s3.S3Client
 import cats.implicits._
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBAsync
-import io.circe.fs2.byteStreamParser
-import org.scanamo.{ScanamoCats, Table}
 
 package object tc {
 
@@ -32,13 +32,19 @@ package object tc {
         .drain
     }
 
-  def recordsStream[F[_]: Concurrent: ContextShift](bucket: BucketName, fileKey: FileKey)(
+  def readFromS3[F[_]: Concurrent: ContextShift](bucket: BucketName, fileKey: FileKey)(
     implicit client: S3Client,
     blocker: Blocker
   ): fs2.Stream[F, Person] =
     for {
       s3 <- fs2.Stream.eval(S3.create[F](client, blocker))
-      s <- s3.readFile(bucket, fileKey).through(byteStreamParser[F]).evalMap(_.as[Person].liftTo[F])
+      s <- s3
+        .readFile(bucket, fileKey)
+        . //Stream of bytes
+        through(circe.fs2.byteStreamParser[F])
+        //        .parEvalMap(5)(json => ???/*do some work in parallel*/)
+        . //Stream of Json
+        evalMap(_.as[Person].liftTo[F]) // Stream of Persons
     } yield s
 
   def storeToDynamo[F[_]: Async](table: Table[Person], dynamoClient: AmazonDynamoDBAsync): fs2.Pipe[F, Person, Unit] =
@@ -52,6 +58,6 @@ package object tc {
     implicit client: S3Client,
     dynamoClient: AmazonDynamoDBAsync,
     blocker: Blocker
-  ): F[Unit] = recordsStream[F](bucket, fileKey).through(storeToDynamo[F](table, dynamoClient)).compile.drain
-
+  ): F[Unit] =
+    readFromS3(bucket, fileKey).through(storeToDynamo(table, dynamoClient)).compile.drain
 }

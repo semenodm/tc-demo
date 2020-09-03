@@ -81,14 +81,14 @@ class TcDemoSpec extends AnyWordSpec with Matchers with ForAllTestContainer {
     "store file in S3" in {
       val hostPort = S3container.mappedPort(9000)
       implicit val s3Client: S3Client = mkS3Client(hostPort)
-      val data: List[Person] = Person("Dmytro", "Semenov") :: Person("Kai", "Wang") :: Nil
+      val data: List[Person] = Person("Kai", "Wang") :: Person("Dmytro", "Semenov") :: Nil
       saveRecords(data, bucket, fileKey).unsafeRunSync()
     }
 
     "read the S3 file and store in in DynamoDB" in {
       implicit val dynamoClient: AmazonDynamoDBAsync = LocalDynamoDB.client(dynamoDB.mappedPort(8000))
       implicit val s3Client: S3Client = mkS3Client(S3container.mappedPort(9000))
-
+//Scanamo??? this is Scala client for DynamoDB
       val persons = Table[Person]("persons")
 
       val ioRes: IO[List[Either[DynamoReadError, Person]]] = for {
